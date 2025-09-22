@@ -7,7 +7,7 @@ import torch.optim as optim
 from sklearn.metrics.pairwise import cosine_similarity
 from model import VTF
 import os
-from dataloader.dataset_stageone_L import trailer_multimodal_features
+from dataloader.dataset_stageone import trailer_multimodal_features
 import pickle as pkl
 def main(args):
     traindata = trailer_multimodal_features(phase='train',

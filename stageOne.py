@@ -99,8 +99,13 @@ def main(args):
             loss_fac_M2_ori = factorization_loss(visual_feature, visual_feature, (1-args.factorization_lambda))
             loss_fac_M2_aug = factorization_loss(aug_visual_feature, aug_visual_feature, (1-args.factorization_lambda))
             loss_t_i = topic_sim_loss(visual_feature, topic_feature, tpoic_w)
+            #loss_t_i = sim_loss(visual_feature, W_t)
+            #cacu sim
 
             loss = 0.5 * loss_fac_M1 + 0.5*(1 * loss_fac_M2_ori + 1 * loss_fac_M2_aug) + 0.8 * loss_t_i
+            # loss = loss_fac_M1 + 0.2*(loss_fac_M2_ori + loss_fac_M2_aug)
+
+
 
             # backward
             optimizer.zero_grad()
@@ -152,11 +157,12 @@ def main(args):
                 W_B = torch.mul(W_expanded, topic_feature)
                 W_t = torch.sum(W_B, dim=1)
 
-
+                # visual_feature = visual_feature.view(len(visual_feature),-1)
                 visual_feature_in = torch.mean(visual_feature_sam, dim=1)
-
+                #visual_feature_in = visual_feature_sam.view(len(visual_feature_sam), -1)
+                # aug_visual_feature = aug_visual_feature.view(len(visual_feature),-1)
                 aug_visual_feature_in = torch.mean(aug_visual_feature_sam, dim=1)
-
+                #aug_visual_feature_in = aug_visual_feature_sam.view(len(aug_visual_feature_sam), -1)
 
                 visual_feature = model(visual_feature_in)
                 aug_visual_feature = model(aug_visual_feature_in)
@@ -258,7 +264,8 @@ def main(args):
             val_loss = total_loss / len(val_loader)
             print(f"Epoch {epoch + 1}: Test Loss: {val_loss}")
 
-    save_W_t_path = os.path.join('./data/Douban2595/features/Topic_features', 'w_topic_BERTopic.pkl')
+    save_W_t_path = os.path.join('./data/MovieNet1100/features/Topic_features', 'w_topic_BERTopic.pkl')
+    #save_W_t_path = 'G:\\second work\\code\\sec-5-25-/data/Douban2595/features/Topic_features/w_topic_BERTopic.pkl'
     with open(save_W_t_path, "wb") as handle:
         pkl.dump(ori_w_t_dic, handle, protocol=pkl.HIGHEST_PROTOCOL)
 if __name__ == '__main__':
@@ -269,21 +276,24 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     #DATASET
-    DATASET_NAME = 'Douban2595'
-    DATA_DIR = 'G:/data/DouBan2595/shot_frame'
+    DATASET_NAME = 'MovieNet1100'
+    DATA_DIR = 'G:/data/movieNet/240P/all'
+
     FEATURE_DIR = os.path.join('data', DATASET_NAME, 'features')
     VISUAL_FOLDER = os.path.join(FEATURE_DIR, 'Visual_features_L')
+
     VISUAL_FEATURE_VERSION = 'ViT-L-14-336'
     # AUDIO_FOLDER = os.path.join(FEATURE_DIR, 'Audio_features')
     # AUDIO_FEATURE_FILE = os.path.join(FEATURE_DIR, 'Audio_features/ori_audio_PANNs.pkl')
     AUDIO_FOLDER = None
     AUDIO_FEATURE_FILE = None
     TEXT_FOLDER = os.path.join(FEATURE_DIR, 'Topic_features')
-    TEXT_FEATURE_FILE = os.path.join(FEATURE_DIR, 'Topic_features/topic_BERTopic.pkl')
+    TEXT_FEATURE_FILE = os.path.join(FEATURE_DIR, 'Topic_features/topic_BERTopic_en.pkl')
     #META_FOLDER = os.path.join(FEATURE_DIR, 'Meta_features')
     META_FOLDER = None
 
-    num_category = {'MovieNet1100':20,'Douban2595':26}
+    #num_category = {'MovieNet1100':20,'Douban2595':26}
+    num_category = {'MovieNet1100': 20, 'Douban2595': 26}
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -293,22 +303,29 @@ if __name__ == '__main__':
     parser.add_argument('--visual_feature_dir', type=str, default=VISUAL_FOLDER, help='path to visual features')
     parser.add_argument('--visual_feature_version', type=str, default="ViT-L-14-336")
     parser.add_argument('--cau_visual', type=str2bool, default=False)
+
     parser.add_argument('--text_feature_dir', type=str, default=None)
     parser.add_argument('--text_feature_file', type=str, default=TEXT_FEATURE_FILE)
     parser.add_argument('--cau_text', type=str2bool, default=False)
+
     parser.add_argument('--audio_feature_dir', type=str, default=None)
     parser.add_argument('--audio_feature_file', type=str,default=None)
     parser.add_argument('--cau_audio', type=str2bool, default=False)
+
     parser.add_argument('--text_token_file',type=str,default=None)
     parser.add_argument('--input_dim', type=int, default=768)
     parser.add_argument('--output_dim', type=int, default=768)
     parser.add_argument('--shot_num', type=int, default=8)
+
     parser.add_argument('--num_categories', type=int, default=num_category[DATASET_NAME], help='num_categories')
-    parser.add_argument('--num_epoch', type=int, default=17, help='number of epochs of training')
-    parser.add_argument('--batch_size', type=int, default=256, help='size of the batches')
+    parser.add_argument('--num_epoch', type=int, default=7, help='number of epochs of training')
+
+    parser.add_argument('--batch_size', type=int, default=512, help='size of the batches')
     parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     parser.add_argument('--factorization_lambda', type=float, default=0.8, help='lambda of factorization_loss')
     args = parser.parse_args()
-    print(args)
     main(args)
-    #+++++++++++++++++++++++++++++++
+
+
+
+

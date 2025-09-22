@@ -1,217 +1,331 @@
-import json
-import os
-from PIL import Image
 import torch
-import numpy as np
-from torch.utils.data import Dataset
-import pickle
-from sklearn.preprocessing import MultiLabelBinarizer
 import torch.nn as nn
+import argparse
+from utils.tools import *
+import json
+import torch.optim as optim
+from sklearn.metrics.pairwise import cosine_similarity
+from model import VTF
+import os
+from dataloader.dataset_stageone import trailer_multimodal_features
+import pickle as pkl
+def main(args):
+    traindata = trailer_multimodal_features(phase='train',
+                                            data_dir=args.data_dir,
+                                            feature_dir=args.feature_dir,
+                                            visual_feature_dir=args.visual_feature_dir,
+                                            visual_feature_file=args.visual_feature_version+"_train.pkl",
+                                            cau_visual = args.cau_visual,
+                                            audio_feature_file=args.audio_feature_file,
+                                            cau_audio=args.cau_audio,
+                                            text_feature_dir = args.text_feature_dir,
+                                            text_token_file=args.text_token_file,
+                                            text_feature_file=args.text_feature_file,
+                                            cau_text=args.cau_text,
+                                            num_classes=args.num_categories,
+                                            )
+
+    valdata = trailer_multimodal_features(phase='val',
+                                          data_dir=args.data_dir,
+                                          feature_dir=args.feature_dir,
+                                          visual_feature_dir=args.visual_feature_dir,
+                                          visual_feature_file=args.visual_feature_version + "_val.pkl",
+                                          cau_visual=args.cau_visual,
+                                          audio_feature_file=args.audio_feature_file,
+                                          cau_audio=args.cau_audio,
+                                          text_feature_dir=args.text_feature_dir,
+                                          text_token_file=args.text_token_file,
+                                          text_feature_file=args.text_feature_file,
+                                          cau_text=args.cau_text,
+                                          num_classes=args.num_categories,
+                                          )
+
+    testdata = trailer_multimodal_features(phase='test',
+                                           data_dir=args.data_dir,
+                                           feature_dir=args.feature_dir,
+                                           visual_feature_dir=args.visual_feature_dir,
+                                           visual_feature_file=args.visual_feature_version + "_test.pkl",
+                                           cau_visual=args.cau_visual,
+                                           audio_feature_file=args.audio_feature_file,
+                                           cau_audio=args.cau_audio,
+                                           text_feature_dir=args.text_feature_dir,
+                                           text_token_file=args.text_token_file,
+                                           text_feature_file=args.text_feature_file,
+                                           cau_text=args.cau_text,
+                                           num_classes=args.num_categories,
+                                           )
+    train_loader = torch.utils.data.DataLoader(traindata, batch_size=args.batch_size, shuffle=False)
+    val_loader = torch.utils.data.DataLoader(valdata, batch_size=args.batch_size, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(testdata, batch_size=args.batch_size, shuffle=False)
+
+    #model = VTF.VectorTransformer(args.shot_num*args.input_dim, args.output_dim)
+    model = VTF.VectorTransformer( args.input_dim, args.output_dim)
+
+    model = model.to(device)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
 
-class trailer_multimodal_features(Dataset):
-    def __init__(self,
-                 phase: str='train',
-                 data_dir: str='',
-                 feature_dir: str='',
-                 visual_feature_dir: str='',
-                 visual_feature_file: str=None,
-                 cau_visual: bool = False,
-                 audio_feature_dir: str=None,
-                 audio_feature_file: str=None,
-                 cau_audio: bool = False,
-                 text_feature_dir: str=None,
-                 text_token_file: str=None,
-                 text_feature_file: str=None,
-                 cau_text: bool = False,
-                 meta_glo_file: str=None,
-                 meta_loc_file: str=None,
-                 num_classes: int=26,
-                 ):
-        self.phase = phase
-        self.data_dir = data_dir
-        self.feature_dir = feature_dir
-        self.visual_feature_dir = visual_feature_dir
-        self.cau_visual = cau_visual
-        self.audio_feature_dir = audio_feature_dir
-        self.audio_feature_file = audio_feature_file
-        self.cau_audio = cau_audio
-        self.text_feature_dir = text_feature_dir
-        self.text_token_file = text_token_file
-        self.text_feature_file = text_feature_file
-        self.cau_text = cau_text
-        self.meta_glo_file = meta_glo_file
-        self.meta_loc_file = meta_loc_file
-        self.num_classes = num_classes
+    ori_w_t_dic = {}
+    for epoch in range(args.num_epoch):
+        total_loss = 0.0
+        model.train()
+        feat_dict = {}
+        aug_feat_dict = {}
 
-        # loading dataset samples
-        with open(os.path.join(self.feature_dir, "data_{}_L.json".format(phase)), 'r') as f:
-            self.data = json.load(f)
-        self.keys = list(self.data.keys())
-        self.samples = list(self.data.values())
+        ori_mean_v_dic = {}
+        for batch_idx, sample in enumerate(train_loader):
+            movie_id, label = sample['movie_id'], sample['label_onehot']
+            visual_feature_sam = sample['visual_feature'].to(device).type(FloatTensor)
+            aug_visual_feature_sam = sample['aug_visual_feature'].to(device).type(FloatTensor)
+            topic_feature_dic = sample['topic_feature']
+            topic_feature = topic_feature_dic['topic'].to(device).type(FloatTensor)
+            tpoic_w = topic_feature_dic['w'].to(device).type(FloatTensor)
 
+            W_expanded = tpoic_w.unsqueeze(2).expand(-1, -1, 768)
+            W_B = torch.mul(W_expanded, topic_feature)
+            W_t = torch.sum(W_B, dim=1)
 
-        if self.visual_feature_dir is not None:
-            if visual_feature_file is None:
-                visual_feature_file="ViT-L-14-336_{}.pkl".format(phase)
-            print('load visual features from:', os.path.join(self.visual_feature_dir, visual_feature_file))
-            with open(os.path.join(self.visual_feature_dir, visual_feature_file) ,'rb') as handle:
-                self.visual_feature_dict = pickle.load(handle)
-            #aug_visual_feature_file="aug_ViT-L-14-336_{}.pkl".format(phase)
-            aug_visual_feature_file = 'aug_' + visual_feature_file
-            print('load aug visual features from:', os.path.join(self.visual_feature_dir, aug_visual_feature_file))
-            with open(os.path.join(self.visual_feature_dir, aug_visual_feature_file) ,'rb') as handle:
-                self.aug_visual_feature_dict = pickle.load(handle)
-        if self.cau_visual == True:
-            cau_visual_feature_file="cau_TG_{}.pkl".format(phase)
-            print('load cau visual features from:', os.path.join(self.visual_feature_dir, cau_visual_feature_file))
-            with open(os.path.join(self.visual_feature_dir, cau_visual_feature_file) ,'rb') as handle:
-                self.cau_visual_feature_dict = pickle.load(handle)
+            #visual_feature = visual_feature.view(len(visual_feature),-1)
+            visual_feature_in = torch.mean(visual_feature_sam, dim=1)
+            #visual_feature_in = visual_feature_sam.view(len(visual_feature_sam), -1)
+            #aug_visual_feature = aug_visual_feature.view(len(visual_feature),-1)
+            aug_visual_feature_in = torch.mean(aug_visual_feature_sam, dim=1)
+            #aug_visual_feature_in = aug_visual_feature_sam.view(len(aug_visual_feature_sam), -1)
+
+            visual_feature = model(visual_feature_in)
+            aug_visual_feature = model(aug_visual_feature_in)
+
+            loss_fac_M1 = factorization_loss(visual_feature, aug_visual_feature, args.factorization_lambda)
+            loss_fac_M2_ori = factorization_loss(visual_feature, visual_feature, (1-args.factorization_lambda))
+            loss_fac_M2_aug = factorization_loss(aug_visual_feature, aug_visual_feature, (1-args.factorization_lambda))
+            loss_t_i = topic_sim_loss(visual_feature, topic_feature, tpoic_w)
+            #loss_t_i = sim_loss(visual_feature, W_t)
+            #cacu sim
+
+            loss = 0.5 * loss_fac_M1 + 0.5*(1 * loss_fac_M2_ori + 1 * loss_fac_M2_aug) + 0.8 * loss_t_i
+            # loss = loss_fac_M1 + 0.2*(loss_fac_M2_ori + loss_fac_M2_aug)
 
 
-        if self.audio_feature_file is not None:
-            print('load audio features from:', self.audio_feature_file)
-            with open(audio_feature_file, 'rb') as handle:
-                self.audio_feature_dict = pickle.load(handle)
 
-            aug_audio_feature_file= self.audio_feature_file.replace('ori', 'aug')
-            print('load aug text features from:', aug_audio_feature_file)
-            with open(aug_audio_feature_file,"rb") as handle:
-                self.aug_audio_feature_dict = pickle.load(handle)
-        if self.cau_audio == True:
-            cau_audio_feature_file="cau_ori_audio_PANNs.pkl".format(phase)
-            print('load cau text features from:', os.path.join(self.audio_feature_dir, cau_audio_feature_file))
-            with open(os.path.join(self.audio_feature_dir, cau_audio_feature_file) ,'rb') as handle:
-                self.cau_audio_feature_dict = pickle.load(handle)
+            # backward
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+            if epoch + 1 == args.num_epoch:
+                save_visual_feature = visual_feature.detach()
+                sava_aug_feature = aug_visual_feature.detach()
+                #
+                save_visual_feature_in = visual_feature_in.detach()
+                save_W_t = W_t.detach()
 
-            cau_aug_audio_feature_file="cau_aug_audio_PANNs.pkl".format(phase)
-            print('load cau aug text features from:', os.path.join(self.audio_feature_dir, cau_aug_audio_feature_file))
-            with open(os.path.join(self.audio_feature_dir, cau_aug_audio_feature_file) ,'rb') as handle:
-                self.cau_aug_audio_feature_dict = pickle.load(handle)
+                for i in range(len(movie_id)):
+                    feat_dict[movie_id[i]] = save_visual_feature[i].cpu().numpy().reshape(1, -1)
+                    aug_feat_dict[movie_id[i]] = sava_aug_feature[i].cpu().numpy().reshape(1, -1)
+                    ori_mean_v_dic[movie_id[i]]  = save_visual_feature_in[i].cpu().numpy().reshape(1, -1)
+                    ori_w_t_dic[movie_id[i]]  = save_W_t[i].cpu().numpy().reshape(1, -1)
+                save_dict_path = os.path.join(args.visual_feature_dir, 'cau_ViT-L-14-336_train.pkl')
+                with open(save_dict_path, "wb") as handle:
+                    pkl.dump(feat_dict, handle, protocol=pkl.HIGHEST_PROTOCOL)
+                save_dict_path = os.path.join(args.visual_feature_dir, 'cau_aug_ViT-L-14-336_train.pkl')
+                with open(save_dict_path, "wb") as handle:
+                    pkl.dump(aug_feat_dict, handle, protocol=pkl.HIGHEST_PROTOCOL)
 
-        if self.text_feature_file is not None:
-            print('load text features from:', self.text_feature_file)
-            with open(text_feature_file,"rb") as handle:
-                self.text_feature_dict = pickle.load(handle)
+                save_dict_path = os.path.join(args.visual_feature_dir, 'mean_ViT-L-14-336_train.pkl')
+                with open(save_dict_path, "wb") as handle:
+                    pkl.dump(ori_mean_v_dic, handle, protocol=pkl.HIGHEST_PROTOCOL)
 
-        if self.cau_text == True:
-            cau_text_feature_file="cau_ori_text_Doc2Vec.pkl".format(phase)
-            print('load cau text features from:', os.path.join(self.text_feature_dir, cau_text_feature_file))
-            with open(os.path.join(self.text_feature_dir, cau_text_feature_file) ,'rb') as handle:
-                self.cau_text_feature_dict = pickle.load(handle)
+        train_loss = total_loss / len(train_loader)
+        print(f"Epoch {epoch + 1}: Train Loss: {train_loss}")
+        model.eval()
 
-            cau_aug_text_feature_file="cau_aug_text_Doc2Vec.pkl".format(phase)
-            print('load cau aug text features from:', os.path.join(self.text_feature_dir, cau_aug_text_feature_file))
-            with open(os.path.join(self.text_feature_dir, cau_aug_text_feature_file) ,'rb') as handle:
-                self.cau_aug_text_feature_dict = pickle.load(handle)
-        if self.meta_glo_file is not None:
-            print('load glo meta features from:', self.meta_glo_file)
-            with open(meta_glo_file, 'rb') as handle:
-                self.meta_glo_dict = pickle.load(handle)
-        if self.meta_loc_file is not None:
-            print('load loc meta features from:', self.meta_loc_file)
-            with open(meta_loc_file, 'rb') as handle:
-                self.meta_loc_dict = pickle.load(handle)
-    def __getitem__(self, index: int):
-        movie_id = self.keys[index]
-        sample = self.samples[index]
-        labels = np.array([int(ele) for ele in sample['label'].split(" ")])
+        with torch.no_grad():
+            feat_dict = {}
+            aug_feat_dict = {}
 
-        labels = torch.LongTensor(labels) # shape: (1)
-        labels_onehot = nn.functional.one_hot(labels, num_classes=self.num_classes) # (postive_labels,num_classes)
-        labels_onehot = labels_onehot.sum(dim=0).float() # (num_classes)
+            ori_mean_v_dic = {}
+            total_loss = 0.0
+            for sample in val_loader:
+                movie_id, label = sample['movie_id'], sample['label_onehot']
+                visual_feature_sam = sample['visual_feature'].to(device).type(FloatTensor)
+                aug_visual_feature_sam = sample['aug_visual_feature'].to(device).type(FloatTensor)
+                topic_feature_dic = sample['topic_feature']
+                topic_feature = topic_feature_dic['topic'].to(device).type(FloatTensor)
+                tpoic_w = topic_feature_dic['w'].to(device).type(FloatTensor)
 
-        return_dict = {
-            "movie_id": movie_id,
-            "label_onehot": labels_onehot,
-        }
+                W_expanded = tpoic_w.unsqueeze(2).expand(-1, -1, 768)
+                W_B = torch.mul(W_expanded, topic_feature)
+                W_t = torch.sum(W_B, dim=1)
 
-        if self.visual_feature_dir is not None:
-            visual_feature_list = []
-            aug_visual_feature_list = []
-            for key, value in sample.items():
-                if key == 'label': continue
-                shot_frame0_path = value[0].replace(self.data_dir+"/","",1)
-                shot_frame1_path = value[1].replace(self.data_dir+"/","",1)
-                shot_frame2_path = value[2].replace(self.data_dir+"/","",1)
+                # visual_feature = visual_feature.view(len(visual_feature),-1)
+                visual_feature_in = torch.mean(visual_feature_sam, dim=1)
+                #visual_feature_in = visual_feature_sam.view(len(visual_feature_sam), -1)
+                # aug_visual_feature = aug_visual_feature.view(len(visual_feature),-1)
+                aug_visual_feature_in = torch.mean(aug_visual_feature_sam, dim=1)
+                #aug_visual_feature_in = aug_visual_feature_sam.view(len(aug_visual_feature_sam), -1)
 
-                shot_frame0_feature = self.visual_feature_dict[shot_frame0_path] # (1,512)
-                shot_frame1_feature = self.visual_feature_dict[shot_frame1_path] # (1,512)
-                shot_frame2_feature = self.visual_feature_dict[shot_frame2_path] # (1,512)
+                visual_feature = model(visual_feature_in)
+                aug_visual_feature = model(aug_visual_feature_in)
 
-                visual_feature_list.append(np.mean([shot_frame0_feature, shot_frame1_feature, shot_frame2_feature], axis=0)) # (1,512)
+                loss_fac_M1 = factorization_loss(visual_feature, aug_visual_feature, args.factorization_lambda)
+                loss_fac_M2_ori = factorization_loss(visual_feature, visual_feature, (1-args.factorization_lambda))
+                loss_fac_M2_aug = factorization_loss(aug_visual_feature, aug_visual_feature, (1-args.factorization_lambda))
+                loss_t_i = topic_sim_loss(visual_feature, topic_feature, tpoic_w)
+                #loss_t_i = sim_loss(visual_feature, W_t)
 
-                shot_frame0_feature = self.aug_visual_feature_dict[shot_frame0_path] # (1,512)
-                shot_frame1_feature = self.aug_visual_feature_dict[shot_frame1_path] # (1,512)
-                shot_frame2_feature = self.aug_visual_feature_dict[shot_frame2_path] # (1,512)
-                aug_visual_feature_list.append(np.mean([shot_frame0_feature, shot_frame1_feature, shot_frame2_feature], axis=0))
+                loss = 0.5 * loss_fac_M1 + 0.5*(1 * loss_fac_M2_ori + 1 * loss_fac_M2_aug) + 0.8 * loss_t_i
+                #loss = loss_fac_M1 + 0.2 * (loss_fac_M2_ori + loss_fac_M2_aug)
+                total_loss += loss.item()
+                if epoch + 1 == args.num_epoch:
+                    save_visual_feature = visual_feature.detach()
+                    sava_aug_feature = aug_visual_feature.detach()
+                    #
+                    save_visual_feature_in = visual_feature_in.detach()
+                    save_W_t = W_t.detach()
+                    for i in range(len(movie_id)):
+                        feat_dict[movie_id[i]] = save_visual_feature[i].cpu().numpy().reshape(1, -1)
+                        aug_feat_dict[movie_id[i]] = sava_aug_feature[i].cpu().numpy().reshape(1, -1)
+                        #
+                        #print(i)
+                        ori_mean_v_dic[movie_id[i]] = save_visual_feature_in[i].cpu().numpy().reshape(1, -1)
+                        ori_w_t_dic[movie_id[i]] = save_W_t[i].cpu().numpy().reshape(1, -1)
+                    save_dict_path = os.path.join(args.visual_feature_dir, 'cau_ViT-L-14-336_val.pkl')
+                    with open(save_dict_path, "wb") as handle:
+                        pkl.dump(feat_dict, handle, protocol=pkl.HIGHEST_PROTOCOL)
+                    save_dict_path = os.path.join(args.visual_feature_dir, 'cau_aug_ViT-L-14-336_val.pkl')
+                    with open(save_dict_path, "wb") as handle:
+                        pkl.dump(aug_feat_dict, handle, protocol=pkl.HIGHEST_PROTOCOL)
 
-            #has only 1-2 shot
-            if len(visual_feature_list) < 8:
-                num = 8-len(visual_feature_list)
-                for _ in range(num):
-                    visual_feature_list.append(visual_feature_list[0])
-            visual_features = np.concatenate(visual_feature_list ,axis=0) # (5,512)-> (num_of_shot, feat_embed_size)
-            return_dict["visual_feature"] = visual_features
-            if len(aug_visual_feature_list) < 8:
-                num = 8-len(aug_visual_feature_list)
-                for _ in range(num):
-                    aug_visual_feature_list.append(aug_visual_feature_list[0])
-            aug_visual_features = np.concatenate(aug_visual_feature_list , axis=0)
-            return_dict["aug_visual_feature"] = aug_visual_features
-        if self.cau_visual == True:
-            cau_visual_feature_list = []
-            #cau_aug_visual_feature_list = []
-            for key, value in sample.items():
-                if key=='label': continue
-                shot_frame0_path = value[0].replace(self.data_dir+"/","",1)
-                shot_frame0_path = shot_frame0_path.split('/')[-2]
-                shot_frame0_feature = self.cau_visual_feature_dict[shot_frame0_path]
-                cau_visual_feature_list.append(shot_frame0_feature)
-                # shot_frame0_feature = self.cau_aug_visual_feature_dict[shot_frame0_path]  # (1,512)
-                # cau_aug_visual_feature_list.append(shot_frame0_feature)
-            if len(cau_visual_feature_list) < 8:
-                num = 8-len(cau_visual_feature_list)
-                for _ in range(num):
-                    cau_visual_feature_list.append(cau_visual_feature_list[0])
-            cau_visual_features = np.concatenate(cau_visual_feature_list , axis=0)
-            return_dict["cau_visual_feature"] = cau_visual_features
+                    save_dict_path = os.path.join(args.visual_feature_dir, 'mean_ViT-L-14-336_val.pkl')
+                    with open(save_dict_path, "wb") as handle:
+                        pkl.dump(ori_mean_v_dic, handle, protocol=pkl.HIGHEST_PROTOCOL)
+            val_loss = total_loss / len(val_loader)
+            print(f"Epoch {epoch + 1}: Validation Loss: {val_loss}")
+            total_loss = 0.0
+            feat_dict = {}
+            aug_feat_dict = {}
 
-        if self.text_feature_file is not None:
-            text_features = self.text_feature_dict[movie_id]
+            ori_mean_v_dic = {}
+            for sample in test_loader:
+                movie_id, label = sample['movie_id'], sample['label_onehot']
+                visual_feature_sam = sample['visual_feature'].to(device).type(FloatTensor)
+                aug_visual_feature_sam = sample['aug_visual_feature'].to(device).type(FloatTensor)
+                topic_feature_dic = sample['topic_feature']
+                topic_feature = topic_feature_dic['topic'].to(device).type(FloatTensor)
+                tpoic_w = topic_feature_dic['w'].to(device).type(FloatTensor)
+
+                W_expanded = tpoic_w.unsqueeze(2).expand(-1, -1, 768)
+                W_B = torch.mul(W_expanded, topic_feature)
+                W_t = torch.sum(W_B, dim=1)
+
+                # visual_feature = visual_feature.view(len(visual_feature),-1)
+                visual_feature_in = torch.mean(visual_feature_sam, dim=1)
+                #visual_feature_in = visual_feature_sam.view(len(visual_feature_sam), -1)
+                # aug_visual_feature = aug_visual_feature.view(len(visual_feature),-1)
+                aug_visual_feature_in = torch.mean(aug_visual_feature_sam, dim=1)
+                #aug_visual_feature_in = aug_visual_feature_sam.view(len(aug_visual_feature_sam), -1)
+
+                visual_feature = model(visual_feature_in)
+                aug_visual_feature = model(aug_visual_feature_in)
+
+                # loss_fac_M1 = factorization_loss(visual_feature, aug_visual_feature, 0.6)
+                # loss_fac_M2_ori = factorization_loss(visual_feature, visual_feature, 0.4)
+                # loss_fac_M2_aug = factorization_loss(aug_visual_feature, aug_visual_feature, 0.4)
+                loss_fac_M1 = factorization_loss(visual_feature, aug_visual_feature, args.factorization_lambda)
+                loss_fac_M2_ori = factorization_loss(visual_feature, visual_feature, (1-args.factorization_lambda))
+                loss_fac_M2_aug = factorization_loss(aug_visual_feature, aug_visual_feature, (1-args.factorization_lambda))
+                loss_t_i = topic_sim_loss(visual_feature, topic_feature, tpoic_w)
+                #loss_t_i = sim_loss(visual_feature, W_t)
+
+                loss = 0.5 * loss_fac_M1 + 0.5*(1 * loss_fac_M2_ori + 1 * loss_fac_M2_aug) + 0.8 * loss_t_i
+                total_loss += loss.item()
+                if epoch + 1 == args.num_epoch:
+                    save_visual_feature = visual_feature.detach()
+                    sava_aug_feature = aug_visual_feature.detach()
+                    #
+                    save_visual_feature_in = visual_feature_in.detach()
+                    save_W_t = W_t.detach()
+                    for i in range(len(movie_id)):
+                        feat_dict[movie_id[i]] = save_visual_feature[i].cpu().numpy().reshape(1, -1)
+                        aug_feat_dict[movie_id[i]] = sava_aug_feature[i].cpu().numpy().reshape(1, -1)
+                        #
+                        ori_mean_v_dic[movie_id[i]] = save_visual_feature_in[i].cpu().numpy().reshape(1, -1)
+                        ori_w_t_dic[movie_id[i]]  = save_W_t[i].cpu().numpy().reshape(1, -1)
+                    save_dict_path = os.path.join(args.visual_feature_dir, 'cau_ViT-L-14-336_test.pkl')
+                    with open(save_dict_path, "wb") as handle:
+                        pkl.dump(feat_dict, handle, protocol=pkl.HIGHEST_PROTOCOL)
+                    save_dict_path = os.path.join(args.visual_feature_dir, 'cau_aug_ViT-L-14-336_test.pkl')
+                    with open(save_dict_path, "wb") as handle:
+                        pkl.dump(aug_feat_dict, handle, protocol=pkl.HIGHEST_PROTOCOL)
+
+                    save_dict_path = os.path.join(args.visual_feature_dir, 'mean_ViT-L-14-336_test.pkl')
+                    with open(save_dict_path, "wb") as handle:
+                        pkl.dump(ori_mean_v_dic, handle, protocol=pkl.HIGHEST_PROTOCOL)
+            val_loss = total_loss / len(val_loader)
+            print(f"Epoch {epoch + 1}: Test Loss: {val_loss}")
+
+    save_W_t_path = os.path.join('./data/MovieNet1100/features/Topic_features', 'w_topic_BERTopic.pkl')
+    #save_W_t_path = 'G:\\second work\\code\\sec-5-25-/data/Douban2595/features/Topic_features/w_topic_BERTopic.pkl'
+    with open(save_W_t_path, "wb") as handle:
+        pkl.dump(ori_w_t_dic, handle, protocol=pkl.HIGHEST_PROTOCOL)
+if __name__ == '__main__':
+    seed = 3407
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    #DATASET
+    DATASET_NAME = 'MovieNet1100'
+    DATA_DIR = 'G:/data/movieNet/240P/all'
+
+    FEATURE_DIR = os.path.join('data', DATASET_NAME, 'features')
+    VISUAL_FOLDER = os.path.join(FEATURE_DIR, 'Visual_features_L')
+
+    VISUAL_FEATURE_VERSION = 'ViT-L-14-336'
+    # AUDIO_FOLDER = os.path.join(FEATURE_DIR, 'Audio_features')
+    # AUDIO_FEATURE_FILE = os.path.join(FEATURE_DIR, 'Audio_features/ori_audio_PANNs.pkl')
+    AUDIO_FOLDER = None
+    AUDIO_FEATURE_FILE = None
+    TEXT_FOLDER = os.path.join(FEATURE_DIR, 'Topic_features')
+    TEXT_FEATURE_FILE = os.path.join(FEATURE_DIR, 'Topic_features/topic_BERTopic_en.pkl')
+    #META_FOLDER = os.path.join(FEATURE_DIR, 'Meta_features')
+    META_FOLDER = None
+
+    #num_category = {'MovieNet1100':20,'Douban2595':26}
+    num_category = {'MovieNet1100': 20, 'Douban2595': 26}
+    FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+    LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', type=str, default=DATA_DIR, help='path to save feature files')
+    parser.add_argument('--feature_dir', type=str, default=FEATURE_DIR, help='path to save feature files')
+    parser.add_argument('--visual_feature_dir', type=str, default=VISUAL_FOLDER, help='path to visual features')
+    parser.add_argument('--visual_feature_version', type=str, default="ViT-L-14-336")
+    parser.add_argument('--cau_visual', type=str2bool, default=False)
+
+    parser.add_argument('--text_feature_dir', type=str, default=None)
+    parser.add_argument('--text_feature_file', type=str, default=TEXT_FEATURE_FILE)
+    parser.add_argument('--cau_text', type=str2bool, default=False)
+
+    parser.add_argument('--audio_feature_dir', type=str, default=None)
+    parser.add_argument('--audio_feature_file', type=str,default=None)
+    parser.add_argument('--cau_audio', type=str2bool, default=False)
+
+    parser.add_argument('--text_token_file',type=str,default=None)
+    parser.add_argument('--input_dim', type=int, default=768)
+    parser.add_argument('--output_dim', type=int, default=768)
+    parser.add_argument('--shot_num', type=int, default=8)
+
+    parser.add_argument('--num_categories', type=int, default=num_category[DATASET_NAME], help='num_categories')
+    parser.add_argument('--num_epoch', type=int, default=7, help='number of epochs of training')
+
+    parser.add_argument('--batch_size', type=int, default=512, help='size of the batches')
+    parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
+    parser.add_argument('--factorization_lambda', type=float, default=0.8, help='lambda of factorization_loss')
+    args = parser.parse_args()
+    main(args)
 
 
-            return_dict["topic_feature"] = text_features
 
-        if self.cau_text:
-            cau_text_features = self.cau_text_feature_dict[movie_id]
-            return_dict["cau_text_feature"] = cau_text_features
 
-            cau_aug_text_features = self.cau_aug_text_feature_dict[movie_id]
-            return_dict["cau_aug_text_feature"] = cau_aug_text_features
-        if self.audio_feature_file is not None:
-            audio_features = self.audio_feature_dict[movie_id]
-            return_dict["audio_feature"] = audio_features # (2048,), PANNs feature
-
-            aug_audio_features = self.aug_audio_feature_dict[movie_id]
-            return_dict["aug_audio_feature"] = aug_audio_features
-        if self.cau_audio:
-            cau_audio_features = self.cau_audio_feature_dict[movie_id]
-            return_dict["cau_audio_feature"] = cau_audio_features
-
-            cau_aug_audio_features = self.cau_aug_audio_feature_dict[movie_id]
-            return_dict["cau_aug_audio_feature"] = cau_aug_audio_features
-        if self.meta_glo_file is not None:
-            meta_glo = self.meta_glo_dict[movie_id]
-            return_dict["meta_glo"] = meta_glo
-        if self.meta_loc_file is not None:
-            meta_loc = self.meta_loc_dict[movie_id]
-            return_dict["meta_loc"] = meta_loc
-        return return_dict
-
-    def __len__(self):
-        return len(self.data)
-
-if __name__ == "__main__":
-    sf = 12
-    # path = '../../data/MovieNet/aug\\tt0035423\\shot_0229_img_0.jpg'

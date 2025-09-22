@@ -5,7 +5,7 @@ import torch
 
 from utils.tools import *
 import json
-from dataloader.dataset_L_3 import trailer_multimodal_features
+from dataloader.dataset_stagetwo import trailer_multimodal_features
 import torch.optim as optim
 from model import StageTwo_11
 import torch.nn as nn
@@ -165,7 +165,7 @@ def main(args):
 
     if args.include_test:
 
-        from test_L import test_main
+        from test import test_main
     class test_ap(object):
         def __init__(self, args):
             self.model_path = log_name
@@ -215,6 +215,7 @@ if __name__ == '__main__':
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -267,5 +268,6 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', type=int, default=5, help='the interval between saved epochs')
     parser.add_argument('--include_test', type=str2bool, default=True, help='do test or not')
     args = parser.parse_args()
+    print(args)
     main(args)
 

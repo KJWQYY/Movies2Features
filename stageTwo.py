@@ -7,7 +7,7 @@ from utils.tools import *
 import json
 from dataloader.dataset_stagetwo import trailer_multimodal_features
 import torch.optim as optim
-from model import StageTwo_11
+from model import JEM
 import torch.nn as nn
 from sklearn.metrics import average_precision_score, precision_score, recall_score
 from sklearn.metrics import coverage_error, label_ranking_loss
@@ -32,6 +32,10 @@ def train(epoch, args):
         f_one['topic_feature'] = sample['topic_feature'].to(device).type(FloatTensor)
         f_one['VTM_topic_feature'] = sample['VTM_topic_feature'].to(device).type(FloatTensor)
 
+        # f_one['cau_text_feature'] = sample['cau_text_feature'].to(device).type(FloatTensor)
+        # f_one['cau_audio_feature'] = sample['cau_audio_feature'].to(device).type(FloatTensor)
+        # f_one['meta_glo'] = sample['meta_glo'].to(device).type(FloatTensor)
+        # f_one['meta_loc'] = sample['meta_loc'].to(device).type(FloatTensor)
 
         label = label.type(LongTensor)
         type_index = torch.cat((torch.zeros(f_one['visual_feature'].shape[-1], dtype=torch.int64), torch.ones(f_one['cau_visual_feature'].shape[-1], dtype=torch.int64)), dim=0).to(device)
@@ -131,7 +135,7 @@ def main(args):
     train_loader = torch.utils.data.DataLoader(traindata, batch_size=args.batch_size, shuffle=False, num_workers=args.n_cpu, pin_memory=False)
     val_loader = torch.utils.data.DataLoader(valdata, batch_size=args.batch_size, shuffle=False, num_workers=args.n_cpu, pin_memory=False)
 
-    model = StageTwo_11.JEM(args.hidden_dim, args.num_layers, args.num_heads, args.meta_num, args.ori_len, args.a_len, args.cau_len, args.type_num, args.num_categories)
+    model = JEM.JEM(args.hidden_dim, args.num_layers, args.num_heads, args.meta_num, args.ori_len, args.a_len, args.cau_len, args.type_num, args.num_categories)
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(),  lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.5, patience=0, verbose=True)
@@ -154,14 +158,14 @@ def main(args):
             print('saving the %d epoch' % (epoch))
             torch.save(model, log_name + "/epoch-%d.pkl" % (epoch))
 
-    f_logger.write("best epoch num: %d" % best_epoch)
-    f_logger.close()
-
-    results = vars(args)
-    results.update({'best_epoch_mAP': best_macro_mAP, 'best_epoch': best_epoch})
-
-    with open(os.path.join(log_name, "train_info.json"), 'w') as f:
-        json.dump(results, f, indent=2)
+    # f_logger.write("best epoch num: %d" % best_epoch)
+    # f_logger.close()
+    #
+    # results = vars(args)
+    # results.update({'best_epoch_mAP': best_macro_mAP, 'best_epoch': best_epoch})
+    #
+    # with open(os.path.join(log_name, "train_info.json"), 'w') as f:
+    #     json.dump(results, f, indent=2)
 
     if args.include_test:
 
@@ -191,8 +195,9 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     #DATASET
-    DATASET_NAME = 'Douban2595'
-    DATA_DIR = 'G:/data/DouBan2595/shot_frame'
+    DATASET_NAME = 'MovieNet1100'
+    #DATA_DIR = 'G:/data/MovieNet1100/shot_frame'
+    DATA_DIR = 'G:/data/movieNet/240P/all'
     FEATURE_DIR = os.path.join('data', DATASET_NAME, 'features')
     VISUAL_FOLDER = os.path.join(FEATURE_DIR, 'Visual_features_L')
     VISUAL_FEATURE_VERSION = 'ViT-L-14-336'
@@ -215,7 +220,7 @@ if __name__ == '__main__':
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
+
     FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
     LongTensor = torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -244,10 +249,11 @@ if __name__ == '__main__':
     parser.add_argument('--input_dim', type=int, default=2048)
     parser.add_argument('--output_dim', type=int, default=160)
 
+
     parser.add_argument('--shot_num', type=int, default=5)
 
     parser.add_argument('--num_categories', type=int, default=num_category[DATASET_NAME], help='num_categories')
-    parser.add_argument('--num_epoch', type=int, default=4, help='number of epochs of training')
+    parser.add_argument('--num_epoch', type=int, default=0, help='number of epochs of training')
     parser.add_argument('--batch_size', type=int, default=128, help='size of the batches')
 
     parser.add_argument('--hidden_dim', type=int, default=1, help='dimensionality of hidden feature')
@@ -268,6 +274,5 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', type=int, default=5, help='the interval between saved epochs')
     parser.add_argument('--include_test', type=str2bool, default=True, help='do test or not')
     args = parser.parse_args()
-    print(args)
     main(args)
 

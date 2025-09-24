@@ -36,8 +36,8 @@ def get_shot_idx(path,ids,sampling_num, window):
 
     return result_dic
 if __name__ == '__main__':
-    movie1k_json='G:/data/movieNet/files/movie1K.split.json'
-    data_path = 'G:/data/movieNet'
+    movie1k_json='/data/movieNet/files/movie1K.split.json'
+    data_path = '/data/movieNet'
     split_path = 'split'
     shotdata_path = os.path.join(data_path, '240P/all')
     with open(movie1k_json, 'r') as f:

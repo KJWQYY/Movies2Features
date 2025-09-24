@@ -7,7 +7,13 @@ pip install -r requirements.txt
 
 ## Data processing
 
-  coming...
+# MovieNet
+```bash
+/data/MovieNet/prepare_data.sh
+```
+```bash
+/data/MovieNet/features/prepare_features.sh
+```
 
 ## Train and Evaluate
 ```bash

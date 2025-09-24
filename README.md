@@ -11,5 +11,5 @@ pip install -r requirements.txt
 
 ## Train and Evaluate
 ```bash
-  python stageOne.py && python stageTwo.py
+  python stage_one.py && python stage_two.py
 ```

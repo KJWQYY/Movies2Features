@@ -5,8 +5,7 @@
 pip install -r requirements.txt
 ```
 ## Datasets
-We performed our experiments on two datasets, MovieNet and MM-Douban. 
-[MovieNet]: https://movienet.github.io
+We performed our experiments on two datasets, [Movienet](https://movienet.github.io) and MM-Douban. 
 ## Data processing
 
 ### MovieNet
